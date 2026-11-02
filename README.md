@@ -30,6 +30,10 @@ Demo-Fahrt laden.
   Intervalltabelle und Zonenverteilung.
 - **Chart.js-Visualisierung** mit Leistung + Herzfrequenz, Phasen-Schattierung,
   ON-Balken, Satz-Klammern, Schwellenlinie und Tooltips.
+- **Schritt-Annotation**: in langen Tempo-Blöcken werden nachhaltige
+  Leistungssprünge (z. B. 236 → 246 → 236 W) als Stufen annotiert – in der
+  Satzkarte, der Intervalltabelle und als Pillen im Chart. Die Intervallgrenzen
+  selbst ändern sich nicht.
 - **PNG-Export** in 4000 × 2720 px: eigene hochauflösende Chart-Instanz plus
   Kopfzeile, KPIs und Strukturübersicht – Annotationen sind bereits im Canvas.
 - **CSV-/JSON-Export** der Intervalle bzw. der kompletten Analyse.
@@ -42,7 +46,7 @@ Voraussetzungen: Node.js ≥ 20.19.
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 19 Unit-Tests
+npm test           # 24 Unit-Tests
 npm run typecheck
 npm run build      # Production-Build nach dist/
 npm run preview
@@ -59,7 +63,8 @@ npm run preview
    - **Satz-Trennung**: Pausen länger als dieser Wert starten einen neuen Satz.
    - **FTP**: optional; aktiviert IF, TSS und die Zonenreferenz.
 4. **PNG exportieren** erzeugt ein fertig komponiertes Bild mit allen Markierungen.
-5. **CSV** exportiert die Intervalltabelle, **JSON** die komplette Analyse inkl. Einstellungen.
+5. **CSV** exportiert die Intervalltabelle (inkl. Stufen), **JSON** die komplette
+   Analyse inkl. Einstellungen.
 
 ## Erkennungsalgorithmus
 
@@ -84,15 +89,21 @@ Die Pipeline ist bewusst erklärbar und ohne Blackbox:
 7. **Kontrast-Prüfung** – nur Blöcke, die sich deutlich von der umgebenden Erholung
    abheben (mind. 12 W und 18 % bzw. 40 W Differenz), gelten als Intervall. Bleibt
    genau ein Block übrig, muss er zusätzlich mindestens 30 % bzw. 45 W über der
-   Erholung liegen. Das verhindert Pseudo-Sätze bei gleichmäßigen Endurance-Fahrten.
-   Stopps und Sensorlücken (< 20 W) zählen nicht als Erholungsreferenz.
+   Erholung liegen. Bei langen Einzel-Blöcken (≥ 15 min) wird die Erholungs-Referenz
+   aus einem weiteren Umfeld (bis 600 s) gezogen, damit Warm-up- und Cool-down-Rampen
+   den Kontrast nicht verfälschen. Das verhindert Pseudo-Sätze bei gleichmäßigen
+   Endurance-Fahrten. Stopps und Sensorlücken (< 20 W) zählen nicht als Erholungsreferenz.
 8. **Satz-Gruppierung** – aufeinanderfolgende ON-Blöcke werden zu einem Satz, solange
    die Pause ≤ `Satz-Trennung` ist und die Intensität nicht um mehr als 30 % springt.
    Mehrstufige Wiederholungen (z. B. 3 × 45 s) werden als Muster erkannt und im
    Satzlabel zusammengefasst.
-9. **Metriken** – Ø/Max-Leistung, Arbeit (kJ), Ø/Max-HF, Trittfrequenz, Normalized Power
-   (30-s-Fenster, vierte Potenz), optional IF/TSS sowie Zeit in sechs Leistungszonen.
-10. **Phasen** – Warm-up, Sätze, Erholung zwischen Sätzen und Cool-down.
+9. **Schritt-Annotation** – werden in Blöcken ≥ 8 min nachhaltige Leistungssprünge
+   (z. B. 236 → 246 → 236 W) erkannt, werden sie als Stufen in der Satzkarte, der
+   Intervalltabelle und als Pillen im Chart annotiert. Die Intervallgrenzen ändern
+   sich dadurch nicht.
+10. **Metriken** – Ø/Max-Leistung, Arbeit (kJ), Ø/Max-HF, Trittfrequenz, Normalized Power
+    (30-s-Fenster, vierte Potenz), optional IF/TSS und Zeit in sechs Leistungszonen.
+11. **Phasen** – Warm-up, Sätze, Erholung zwischen Sätzen und Cool-down.
 
 Die Intervalle selbst werden auf den **unglätteten** Rohdaten ausgewertet; geglättet
 wird nur die Segmentierung.
@@ -112,12 +123,12 @@ fit-insight/
 │   │   ├── analyze.ts          # Gesamt-Pipeline
 │   │   ├── series.ts           # 1-Hz-Resampling & Interpolation
 │   │   ├── threshold.ts        # Otsu-Auto-Schwelle
-│   │   ├── detect.ts           # Hysterese, Intervalle, Sätze, Phasen
+│   │   ├── detect.ts           # Hysterese, Intervalle, Sätze, Phasen, Schritte
 │   │   ├── metrics.ts          # NP, IF/TSS, Arbeit, Zonen
 │   │   └── math.ts             # Median, Perzentile, Glättung, NP
 │   ├── chart/
 │   │   ├── chartConfig.ts      # Chart.js-Konfiguration & Annotationen
-│   │   ├── phasePlugin.ts      # ON-Balken, Satz-Klammern, Phasenlabels
+│   │   ├── phasePlugin.ts      # ON-Balken, Satz-Klammern, Phasenlabels, Schritt-Pillen
 │   │   ├── downsample.ts       # LTTB, lückenerhaltend
 │   │   ├── exportPng.ts        # Offscreen-Chart → komponiertes PNG
 │   │   └── setup.ts            # Chart.js-Registrierung
@@ -132,7 +143,7 @@ fit-insight/
 │   └── utils/
 │       ├── format.ts
 │       └── download.ts
-└── tests/                      # Parser, Resampling, Schwellen, Erkennung, Downsampling
+└── tests/                      # Parser, Resampling, Schwellen, Erkennung, Downsampling, Schritte
 ```
 
 ## Tests & Deployment
@@ -147,7 +158,9 @@ Abgedeckt sind unter anderem:
 - Intervallerkennung der Demo-Fahrt inklusive 30/30-, 60/60- und 30/30-Sätzen,
 - Lücken-/Interpolationsverhalten des Resamplings,
 - Auto-Schwelle bei bimodaler und gleichmäßiger Verteilung,
-- lückenerhaltendes LTTB-Downsampling.
+- lückenerhaltendes LTTB-Downsampling,
+- Einzel-Block-Kontrast mit weitem Referenzfenster (lange Tempo-Blöcke),
+- Schritt-Annotation (nachhaltige Sprünge, Rampen, kurze Blöcke).
 
 Der Push auf den Default-Branch triggert den Workflow
 `.github/workflows/pages.yml`: Installieren, Testlauf, Production-Build und
@@ -162,8 +175,8 @@ sorgt für relative Asset-Pfade).
 - Der PNG-Export läuft vollständig clientseitig.
 - Das Repository enthält bewusst **keine echten FIT-Beispieldateien** – die
   Erkennung wurde lokal gegen reale Garmin-Workouts validiert (45/45/45-s-Steps,
-  8/8/10-min-Blöcke, Over-Unders, 60/60 sowie flache Dauerfahrten), die Dateien
-  selbst bleiben auf dem Gerät des Eigentümers.
+  8/8/10-min-Blöcke, Over-Unders, 60/60 sowie flache Tempo- und Dauerfahrten),
+  die Dateien selbst bleiben auf dem Gerät des Eigentümers.
 
 ## Grenzen
 

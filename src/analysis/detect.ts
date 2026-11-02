@@ -3,10 +3,25 @@ import type {
   FitLap,
   Interval,
   Phase,
+  PowerStep,
   RideSeries,
   WorkoutSet,
 } from '../types';
 import { mean, median, movingAverage, roundTo } from './math';
+
+/** Erholungsfenster für die Kontrast-Referenz um einen Block herum. */
+const RECOVERY_WINDOW_SECONDS = 120;
+/** Weiteres Referenzfenster für lange Einzel-Blöcke (Rampen-Schultern). */
+const WIDE_RECOVERY_WINDOW_SECONDS = 600;
+/** Ab dieser Dauer gilt das weite Referenzfenster im Einzel-Block-Fall. */
+const MIN_WIDE_BLOCK_SECONDS = 900;
+/** Ab dieser Blockdauer werden interne Leistungssprünge annotiert. */
+const MIN_STEP_BLOCK_SECONDS = 480;
+/** Jedes Niveau muss mindestens so lange stabil gehalten werden. */
+const MIN_STEP_SEGMENT_SECONDS = 150;
+/** Vergleichsfenster links/rechts eines Sprungs. */
+const STEP_WINDOW_SECONDS = 45;
+const MAX_STEPS = 3;
 
 export interface DetectionResult {
   intervals: Interval[];
@@ -35,9 +50,21 @@ export function detectIntervals(
 ): DetectionResult {
   const points = series.points;
   const powers = points.map((point) => point.power ?? 0);
+  const smoothed = movingAverage(
+    powers,
+    Math.max(1, Math.round(options.smoothingSeconds)),
+  );
 
   const lapIntervals = buildLapIntervals(series, options, laps);
-  const cores = lapIntervals ?? buildPowerIntervals(series, options, powers);
+  const cores = lapIntervals ?? buildPowerIntervals(series, options, powers, smoothed);
+
+  // Interne Leistungssprünge in langen Blöcken annotieren (z. B. Tempo-
+  // stufen 236 → 246 → 236 W). Das verändert keine Intervallgrenzen.
+  for (const core of cores) {
+    if (core.duration >= MIN_STEP_BLOCK_SECONDS) {
+      core.steps = detectSteps(smoothed, core.start, core.end);
+    }
+  }
 
   const groups = groupIntervals(cores, options.setBreakSeconds);
   const intervals: Interval[] = [];
@@ -66,12 +93,9 @@ function buildPowerIntervals(
   series: RideSeries,
   options: DetectionOptions,
   powers: readonly number[],
+  smoothed: readonly number[],
 ): IntervalCore[] {
   const points = series.points;
-  const smoothed = movingAverage(
-    powers,
-    Math.max(1, Math.round(options.smoothingSeconds)),
-  );
   const mask = new Uint8Array(smoothed.length);
   for (let i = 0; i < smoothed.length; i++) {
     mask[i] = smoothed[i] >= options.thresholdW ? 1 : 0;
@@ -217,6 +241,86 @@ function filterIsolatedShortIntervals(
 }
 
 /**
+ * Erkennt nachhaltige Leistungssprünge innerhalb eines langen Blocks und
+ * gibt sie als Stufenprofil zurück (erster Eintrag = Anfangsniveau). Es werden
+ * nur Sprünge zwischen zwei stabilen Niveaus annotiert – Rampen und Rauschen
+ * bleiben unberücksichtigt. Die Intervallgrenzen selbst ändern sich nicht.
+ */
+function detectSteps(
+  smoothed: readonly number[],
+  start: number,
+  end: number,
+): PowerStep[] | undefined {
+  const duration = end - start;
+  if (duration < MIN_STEP_BLOCK_SECONDS) return undefined;
+
+  const blockMean = mean(smoothed.slice(start, end));
+  if (!Number.isFinite(blockMean) || blockMean <= 0) return undefined;
+
+  // Nur klar über dem Rauschen liegende Sprünge (min. 6 W bzw. 2,5 %).
+  const minScore = Math.max(6, blockMean * 0.025);
+  const lo = start + MIN_STEP_SEGMENT_SECONDS;
+  const hi = end - MIN_STEP_SEGMENT_SECONDS;
+  if (hi <= lo) return undefined;
+
+  const window = STEP_WINDOW_SECONDS;
+  const candidates: Array<{ index: number; score: number }> = [];
+  for (let i = lo; i <= hi; i++) {
+    const left = mean(smoothed.slice(Math.max(start, i - window), i));
+    const right = mean(smoothed.slice(i, Math.min(end, i + window)));
+    const leftOuter = mean(smoothed.slice(Math.max(start, i - 2 * window), i - window));
+    const rightOuter = mean(
+      smoothed.slice(i + window, Math.min(end, i + 2 * window)),
+    );
+    if (
+      !Number.isFinite(left) ||
+      !Number.isFinite(right) ||
+      !Number.isFinite(leftOuter) ||
+      !Number.isFinite(rightOuter)
+    ) {
+      continue;
+    }
+    const score = right - left;
+    if (Math.abs(score) < minScore) continue;
+    // Flach-zu-flach: die Niveaus müssen links und rechts des Sprungs stabil
+    // sein. Dadurch werden Rampen und Ausreißer nicht als Stufe annotiert.
+    const leftStable = Math.abs(left - leftOuter) < minScore * 0.5;
+    const rightStable = Math.abs(right - rightOuter) < minScore * 0.5;
+    if (leftStable && rightStable) {
+      candidates.push({ index: i, score });
+    }
+  }
+  if (candidates.length === 0) return undefined;
+
+  // Stärkste lokale Betragsmaxima, mindestens ein Segment auseinander.
+  const peaks = candidates.filter(
+    (candidate, index) =>
+      Math.abs(candidate.score) >= Math.abs(candidates[index - 1]?.score ?? 0) &&
+      Math.abs(candidate.score) >= Math.abs(candidates[index + 1]?.score ?? 0),
+  );
+  peaks.sort((a, b) => Math.abs(b.score) - Math.abs(a.score));
+  const picked: number[] = [];
+  for (const peak of peaks) {
+    if (picked.every((index) => Math.abs(index - peak.index) >= MIN_STEP_SEGMENT_SECONDS)) {
+      picked.push(peak.index);
+    }
+    if (picked.length >= MAX_STEPS) break;
+  }
+  if (picked.length === 0) return undefined;
+  picked.sort((a, b) => a - b);
+
+  // Niveaus als Mittelwert der Abschnitte zwischen den Sprüngen.
+  const boundaries = [start, ...picked, end];
+  const steps: PowerStep[] = [];
+  for (let k = 0; k < boundaries.length - 1; k++) {
+    const level = mean(smoothed.slice(boundaries[k], boundaries[k + 1]));
+    if (!Number.isFinite(level)) return undefined;
+    steps.push({ at: boundaries[k], power: roundTo(level, 5) });
+  }
+  return steps.length >= 2 ? steps : undefined;
+}
+
+/**
  * Nutzt die FIT-Laps als Intervallgrenzen, wenn sie die Workout-Struktur
  * abbilden. Entscheidend ist die Leistung pro Lap: Laps über der ON-Schwelle
  * sind Belastungen, Laps darunter Pausen/Warm-up/Cool-down. Das funktioniert
@@ -358,47 +462,70 @@ function filterByContrast(
     covered.fill(1, Math.max(0, interval.start), Math.min(covered.length, interval.end));
   }
 
-  const scored = intervals.map((interval) => {
-    const before = meanOfRecovery(powers, covered, interval.start, -1);
-    const after = meanOfRecovery(powers, covered, interval.end, 1);
-    const baseline =
-      before != null && after != null ? (before + after) / 2 : (before ?? after);
-    if (baseline == null) {
-      return { interval, keep: true, strong: true };
-    }
-
-    const delta = interval.avgPower - baseline;
-    const ratio = interval.avgPower / Math.max(1, baseline);
-    return {
-      interval,
-      keep: delta >= 12 && (ratio >= 1.18 || delta >= 40),
-      strong: ratio >= 1.3 || delta >= 45,
-    };
-  });
+  const scored = intervals.map((interval) =>
+    scoreInterval(powers, covered, interval, RECOVERY_WINDOW_SECONDS),
+  );
 
   const kept = scored.filter((entry) => entry.keep);
   if (kept.length !== 1) return kept.map((entry) => entry.interval);
 
-  // Ein einzelner Block muss sich deutlich abheben. Sonst handelt es sich um
-  // eine gleichmäßige Fahrt, die nur zufällig die Schwelle überschreitet.
+  // Ein einzelner Block muss sich deutlich abheben. Bei langen Blöcken
+  // (≥ 15 min) können die unmittelbaren 120-s-Schulterfenster noch Rampen-
+  // anteile des Warm-ups bzw. Cool-downs enthalten und die Referenz künstlich
+  // nah an die Blockleistung ziehen – die Referenz wird dann aus einem weiten
+  // Umfeld (bis 600 s) gezogen. Kurze Einzelblöcke behalten die strenge lokale
+  // Bewertung, damit flache Fahrten mit kurzen Anstiegen keine Pseudoblöcke
+  // produzieren.
   const only = kept[0];
-  return only.strong ? [only.interval] : [];
+  if (only.interval.duration < MIN_WIDE_BLOCK_SECONDS) {
+    return only.strong ? [only.interval] : [];
+  }
+  const wide = scoreInterval(powers, covered, only.interval, WIDE_RECOVERY_WINDOW_SECONDS);
+  return wide.keep && wide.strong ? [only.interval] : [];
+}
+
+function scoreInterval(
+  powers: readonly number[],
+  covered: Uint8Array,
+  interval: IntervalCore,
+  windowSeconds: number,
+): { interval: IntervalCore; keep: boolean; strong: boolean } {
+  const before = meanOfRecovery(powers, covered, interval.start, -1, windowSeconds);
+  const after = meanOfRecovery(powers, covered, interval.end, 1, windowSeconds);
+  const baseline =
+    before != null && after != null ? (before + after) / 2 : (before ?? after);
+  if (baseline == null) {
+    return { interval, keep: true, strong: true };
+  }
+
+  const delta = interval.avgPower - baseline;
+  const ratio = interval.avgPower / Math.max(1, baseline);
+  return {
+    interval,
+    keep: delta >= 12 && (ratio >= 1.18 || delta >= 40),
+    strong: ratio >= 1.3 || delta >= 45,
+  };
 }
 
 /**
- * Mittlere Leistung der nächsten erholten Umgebung. Sucht bis zu 120 s in
- * Richtung `direction` und überspringt dabei alle Intervallbereiche.
+ * Mittlere Leistung der nächsten erholten Umgebung. Sucht bis zu
+ * `windowSeconds` in Richtung `direction` und überspringt dabei alle
+ * Intervallbereiche.
  */
 function meanOfRecovery(
   powers: readonly number[],
   covered: Uint8Array,
   start: number,
   direction: -1 | 1,
+  windowSeconds: number,
 ): number | null {
   let sum = 0;
   let count = 0;
   let index = direction === -1 ? start - 1 : start;
-  const limit = direction === -1 ? Math.max(0, start - 120) : Math.min(powers.length, start + 120);
+  const limit =
+    direction === -1
+      ? Math.max(0, start - windowSeconds)
+      : Math.min(powers.length, start + windowSeconds);
 
   while (direction === -1 ? index >= limit : index < limit) {
     if (covered[index] === 0) {

@@ -33,6 +33,7 @@ export function createPhaseOverlayPlugin(
       }
 
       drawPhaseLabels(ctx, chart, analysis, compact);
+      drawStepMarkers(ctx, chart, analysis);
       ctx.restore();
 
       drawSetBrackets(ctx, chart, analysis, compact);
@@ -100,6 +101,57 @@ function drawPhaseLabels(
   }
 }
 
+/**
+ * Markiert interne Leistungssprünge in langen Blöcken (z. B. 236 → 246 W):
+ * dezente gestrichelte Vertikale plus Pille am neuen Niveau.
+ */
+function drawStepMarkers(
+  ctx: CanvasRenderingContext2D,
+  chart: Chart<'line'>,
+  analysis: AnalysisResult,
+): void {
+  const { chartArea } = chart;
+  const xScale = chart.scales.x;
+  const powerScale = chart.scales.power;
+  if (!chartArea || !xScale || !powerScale) return;
+
+  for (const interval of analysis.intervals) {
+    if (!interval.steps || interval.steps.length < 2) continue;
+
+    for (let i = 1; i < interval.steps.length; i++) {
+      const step = interval.steps[i];
+      const previous = interval.steps[i - 1];
+      const up = step.power > previous.power;
+      const x = xScale.getPixelForValue(step.at);
+      if (x < chartArea.left + 4 || x > chartArea.right - 4) continue;
+
+      ctx.save();
+      ctx.strokeStyle = 'rgba(226, 232, 240, 0.22)';
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(x, chartArea.top + 6);
+      ctx.lineTo(x, chartArea.bottom - 4);
+      ctx.stroke();
+      ctx.restore();
+
+      const levelY = clamp(
+        powerScale.getPixelForValue(step.power) - 16,
+        chartArea.top + 12,
+        chartArea.bottom - 12,
+      );
+      drawPillLabel(
+        ctx,
+        `${up ? '↗' : '↘'} ${Math.round(step.power)} W`,
+        x,
+        levelY,
+        up ? 'rgba(0, 229, 255, 0.45)' : 'rgba(245, 158, 11, 0.35)',
+        up ? '#00E5FF' : '#fbbf24',
+      );
+    }
+  }
+}
+
 function drawSetBrackets(
   ctx: CanvasRenderingContext2D,
   chart: Chart<'line'>,
@@ -145,16 +197,40 @@ function drawSetBrackets(
             set.offSeconds,
           )})`
         : `${set.reps}× ${formatAxisDuration(set.onSeconds)}`;
+    const detailCompact = set.patternSeconds?.length
+      ? `${set.reps}× ${set.patternSeconds.map(formatAxisDuration).join('/')}${
+          set.offSeconds > 0 ? `+${formatAxisDuration(set.offSeconds)}` : ''
+        }`
+      : set.offSeconds > 0
+        ? `${set.reps}× ${formatAxisDuration(set.onSeconds)}/${formatAxisDuration(
+            set.offSeconds,
+          )}`
+        : `${set.reps}× ${formatAxisDuration(set.onSeconds)}`;
     const full = `SET ${set.id}: ${detail}`;
+    const medium = `SET ${set.id}: ${detailCompact}`;
     const short = `SET ${set.id}`;
 
-    ctx.font = `700 11px ${FONT}`;
-    const label =
-      !compact && ctx.measureText(full).width + 10 < width
-        ? full
-        : !compact && ctx.measureText(short).width + 8 < width
-          ? short
-          : `S${set.id}`;
+    const fits = (text: string, padding: number): boolean =>
+      ctx.measureText(text).width + padding < width;
+
+    // Stufenweise kürzere Labels, bis die Klammerbreite reicht:
+    // Langform → kompakte Form (10 px) → "SET n" → "Sn".
+    let label: string;
+    let labelFont = `700 11px ${FONT}`;
+    ctx.font = labelFont;
+    if (!compact && fits(full, 10)) {
+      label = full;
+    } else {
+      labelFont = `700 10px ${FONT}`;
+      ctx.font = labelFont;
+      if (!compact && fits(medium, 8)) {
+        label = medium;
+      } else {
+        labelFont = `700 11px ${FONT}`;
+        ctx.font = labelFont;
+        label = !compact && fits(short, 8) ? short : `S${set.id}`;
+      }
+    }
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(label, (x0 + x1) / 2, bracketY - 4);
 
@@ -173,6 +249,8 @@ function drawPillLabel(
   text: string,
   centerX: number,
   centerY: number,
+  borderColor = 'rgba(245, 158, 11, 0.35)',
+  textColor = '#fbbf24',
 ): void {
   ctx.save();
   ctx.font = `600 9.5px ${FONT}`;
@@ -186,11 +264,11 @@ function drawPillLabel(
   ctx.roundRect(x, y, width, height, 8);
   ctx.fillStyle = 'rgba(18, 18, 22, 0.82)';
   ctx.fill();
-  ctx.strokeStyle = 'rgba(245, 158, 11, 0.35)';
+  ctx.strokeStyle = borderColor;
   ctx.lineWidth = 1;
   ctx.stroke();
 
-  ctx.fillStyle = '#fbbf24';
+  ctx.fillStyle = textColor;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillText(text, centerX, centerY + 0.5);

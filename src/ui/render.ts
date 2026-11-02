@@ -1,4 +1,4 @@
-import type { AnalysisResult, RideData } from '../types';
+import type { AnalysisResult, PowerStep, RideData } from '../types';
 import {
   formatClock,
   formatDecimal,
@@ -111,6 +111,7 @@ export function renderSets(container: HTMLElement, analysis: AnalysisResult): vo
           </div>
           <h3>${reps}</h3>
           <p class="set-target">${pause}@ ${formatNumber(set.targetPower)} W</p>
+          ${stepLine(set)}
           <dl class="set-stats">
             <div><dt>Ø Leistung</dt><dd>${formatNumber(set.avgPower)} W</dd></div>
             <div><dt>Max</dt><dd>${formatNumber(set.maxPower)} W</dd></div>
@@ -126,7 +127,7 @@ export function renderIntervals(container: HTMLElement, analysis: AnalysisResult
   if (analysis.intervals.length === 0) {
     container.innerHTML = `
       <tr>
-        <td colspan="9">
+        <td colspan="10">
           <div class="empty-state">Keine Intervalle erkannt – Schwellenwerte anpassen.</div>
         </td>
       </tr>`;
@@ -143,6 +144,9 @@ export function renderIntervals(container: HTMLElement, analysis: AnalysisResult
           <td>${formatSeconds(interval.duration)}</td>
           <td class="num strong">${formatNumber(interval.avgPower)}</td>
           <td class="num">${formatNumber(interval.maxPower)}</td>
+          <td class="steps"${interval.steps?.length ? ` title="${stepChanges(interval.steps)}"` : ''}>${
+            interval.steps?.length ? stepLevels(interval.steps) : '–'
+          }</td>
           <td class="num">${interval.avgHeartRate != null ? formatNumber(interval.avgHeartRate) : '–'}</td>
           <td class="num">${interval.avgCadence != null ? formatNumber(interval.avgCadence) : '–'}</td>
           <td class="num">${formatDecimal(interval.workKJ, 1)}</td>
@@ -265,4 +269,27 @@ function formatSeconds(seconds: number): string {
   const rounded = Math.max(0, Math.round(seconds));
   if (rounded < 90) return `${rounded} s`;
   return formatClock(rounded);
+}
+
+/** Stufenzeile in der Satzkarte, z. B. „Stufen: 236 → 246 → 236 W“. */
+function stepLine(set: { intervals: readonly { steps?: readonly PowerStep[] }[] }): string {
+  const withSteps = set.intervals.find((interval) => interval.steps?.length);
+  if (!withSteps?.steps) return '';
+  return `<p class="set-steps" title="${stepChanges(withSteps.steps)}">Stufen: ${stepLevels(
+    withSteps.steps,
+  )} W</p>`;
+}
+
+function stepLevels(steps: readonly PowerStep[]): string {
+  return steps.map((step) => Math.round(step.power)).join(' → ');
+}
+
+function stepChanges(steps: readonly PowerStep[]): string {
+  return steps
+    .slice(1)
+    .map((step, index) => {
+      const up = step.power > steps[index].power;
+      return `${formatClock(step.at)} ${up ? '↗' : '↘'} ${Math.round(step.power)} W`;
+    })
+    .join(' · ');
 }

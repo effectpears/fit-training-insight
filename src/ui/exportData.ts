@@ -11,6 +11,7 @@ export function exportIntervalsCsv(ride: RideData, analysis: AnalysisResult): vo
     'duration_s',
     'avg_power_w',
     'max_power_w',
+    'steps_w',
     'avg_hr_bpm',
     'avg_cadence_rpm',
     'work_kj',
@@ -26,6 +27,9 @@ export function exportIntervalsCsv(ride: RideData, analysis: AnalysisResult): vo
         interval.duration,
         interval.avgPower.toFixed(1),
         interval.maxPower,
+        interval.steps?.length
+          ? interval.steps.map((step) => Math.round(step.power)).join('->')
+          : '',
         interval.avgHeartRate?.toFixed(1) ?? '',
         interval.avgCadence?.toFixed(1) ?? '',
         interval.workKJ.toFixed(2),

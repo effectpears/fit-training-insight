@@ -88,6 +88,16 @@ export interface Phase {
   setId?: number;
 }
 
+/**
+ * Leistungsstufe innerhalb eines langen Blocks (z. B. 236 → 246 → 236 W).
+ * Der erste Eintrag trägt das Anfangsniveau (at = Blockstart), alle weiteren
+ * den Zeitpunkt des Sprungs und das neue Niveau.
+ */
+export interface PowerStep {
+  at: number;
+  power: number;
+}
+
 export interface Interval {
   index: number;
   setId: number;
@@ -100,6 +110,8 @@ export interface Interval {
   maxHeartRate: number | null;
   avgCadence: number | null;
   workKJ: number;
+  /** Interne Leistungssprünge bei langen Blöcken (≥ 8 min). */
+  steps?: PowerStep[];
 }
 
 export interface WorkoutSet {

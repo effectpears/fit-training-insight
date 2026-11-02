@@ -86,4 +86,119 @@ describe('Kontrastprüfung', () => {
     expect(result.intervals).toHaveLength(1);
     expect(result.sets[0].targetPower).toBe(300);
   });
+
+  it('behält einen einzelnen langen Block mit Rampen-Schultern', () => {
+    // Warm-up-Rampe endet knapp unter dem Blockniveau, der Cool-down startet
+    // knapp darunter: die unmittelbaren Schulterfenster liegen daher fast auf
+    // der Blockleistung. Die weite Referenz (bis 600 s) muss den Block retten.
+    const start = Date.UTC(2026, 5, 2, 8, 0, 0);
+    const records = Array.from({ length: 3600 }, (_, second) => {
+      let power: number;
+      if (second < 900) power = 150 + (75 * second) / 900;
+      else if (second < 2700) power = 230;
+      else power = 185 - (60 * (second - 2700)) / 900;
+      return { timestamp: start + second * 1000, power };
+    });
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 200 },
+      null,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    expect(result.sets).toHaveLength(1);
+    expect(result.intervals[0].avgPower).toBeGreaterThan(215);
+    // Konstantes Plateau → keine Stufen-Annotation.
+    expect(result.intervals[0].steps).toBeUndefined();
+  });
+});
+
+describe('Schritt-Annotation in langen Blöcken', () => {
+  it('annotiert nachhaltige Leistungssprünge als Stufen', () => {
+    const start = Date.UTC(2026, 5, 3, 8, 0, 0);
+    const records = Array.from({ length: 3000 }, (_, second) => {
+      let power: number;
+      if (second < 300) power = 150;
+      else if (second < 900) power = 200;
+      else if (second < 1500) power = 220;
+      else if (second < 2100) power = 200;
+      else power = 140;
+      return { timestamp: start + second * 1000, power };
+    });
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 180 },
+      null,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    const steps = result.intervals[0].steps;
+    expect(steps).toBeDefined();
+    expect(steps!.length).toBe(3);
+    expect(steps![0].power).toBeCloseTo(200, 0);
+    expect(steps![1].power).toBeCloseTo(220, 0);
+    expect(steps![2].power).toBeCloseTo(200, 0);
+    expect(Math.abs(steps![1].at - 900)).toBeLessThanOrEqual(15);
+    expect(Math.abs(steps![2].at - 1500)).toBeLessThanOrEqual(15);
+  });
+
+  it('annotiert keine Stufen bei konstantem Block mit Rauschen', () => {
+    const start = Date.UTC(2026, 5, 4, 8, 0, 0);
+    const records = Array.from({ length: 3600 }, (_, second) => {
+      let power: number;
+      if (second < 600) power = 150;
+      else if (second < 2400) power = 240 + ((second * 37) % 5) - 2;
+      else power = 150;
+      return { timestamp: start + second * 1000, power };
+    });
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 200 },
+      null,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    expect(result.intervals[0].steps).toBeUndefined();
+  });
+
+  it('annotiert keine Stufen bei kurzen Blöcken', () => {
+    const start = Date.UTC(2026, 5, 5, 8, 0, 0);
+    const records = Array.from({ length: 1800 }, (_, second) => {
+      const power = second < 600 ? 150 : second < 960 ? 250 : 150;
+      return { timestamp: start + second * 1000, power };
+    });
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 200 },
+      null,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    expect(result.intervals[0].steps).toBeUndefined();
+  });
+
+  it('ignoriert Rampen innerhalb eines langen Blocks', () => {
+    // Block mit anhaltender Rampe (keine flachen Niveaus) → keine Stufen.
+    const start = Date.UTC(2026, 5, 6, 8, 0, 0);
+    const records = Array.from({ length: 3600 }, (_, second) => {
+      let power: number;
+      if (second < 600) power = 140;
+      else if (second < 2400) power = 200 + (40 * (second - 600)) / 1800;
+      else power = 140;
+      return { timestamp: start + second * 1000, power };
+    });
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 190 },
+      null,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    expect(result.intervals[0].steps).toBeUndefined();
+  });
 });

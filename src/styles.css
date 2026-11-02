@@ -884,6 +884,13 @@ input[type="range"]:focus-visible {
   font-weight: 600;
 }
 
+.set-steps {
+  margin: -8px 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
 .set-stats {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -984,6 +991,11 @@ input[type="range"]:focus-visible {
 .interval-table .strong {
   color: var(--text);
   font-weight: 550;
+}
+
+.interval-table .steps {
+  color: var(--dim);
+  font-size: 10.5px;
 }
 
 .set-chip {
