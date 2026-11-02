@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="de">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#121212" />
+    <meta
+      name="description"
+      content="FIT-Dateien lokal analysieren: Intervalle automatisch erkennen, Leistungsprofil visualisieren und als PNG exportieren."
+    />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>FIT Insight · Intervallanalyse für Garmin &amp; Rad</title>
+  </head>
+  <body>
+    <div class="progress" id="progress" hidden><span></span></div>
+
+    <div class="app">
+      <header class="topbar">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 32 32" fill="none">
+              <path d="M2 18h5l3-9 4 16 4-12 3 5h9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </span>
+          <div class="brand-text">
+            <strong>FIT<span>Insight</span></strong>
+            <small>Intervallanalyse für Garmin &amp; Rad</small>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span class="file-chip" id="file-chip" hidden></span>
+          <button class="btn btn-ghost" id="new-file-btn" type="button" hidden>Neue Datei</button>
+          <button class="btn btn-primary" id="export-btn" type="button" disabled>
+            <svg viewBox="0 0 20 20" fill="none" aria-hidden="true">
+              <path d="M10 3v9m0 0 3.5-3.5M10 12 6.5 8.5M4 15.5h12" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            PNG exportieren
+          </button>
+        </div>
+      </header>
+
+      <main>
+        <section
+          class="dropzone"
+          id="dropzone"
+          tabindex="0"
+          role="button"
+          aria-label="FIT-Datei auswählen oder hierher ziehen"
+        >
+          <input id="file-input" type="file" accept=".fit,application/octet-stream" hidden />
+          <div class="dropzone-glow" aria-hidden="true"></div>
+          <div class="dz-icon" aria-hidden="true">
+            <svg viewBox="0 0 48 48" fill="none">
+              <path d="M24 8v22m0-22 8 8m-8-8-8 8" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+              <path d="M10 30v4a6 6 0 0 0 6 6h16a6 6 0 0 0 6-6v-4" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" />
+            </svg>
+          </div>
+          <span class="eyebrow">Lokal. Schnell. Ohne Upload.</span>
+          <h1>FIT-Datei hierher ziehen</h1>
+          <p class="dz-sub">oder <span class="text-link">Datei auswählen</span> · Garmin, Wahoo, Zwift &amp; Co.</p>
+          <p class="dz-privacy">
+            <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+              <path d="M4.5 7V5a3.5 3.5 0 1 1 7 0v2M3.5 7h9v6.5h-9V7Z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round" />
+            </svg>
+            Deine Daten bleiben im Browser – kein Server-Upload.
+          </p>
+          <div class="dz-actions">
+            <button class="btn btn-ghost" id="demo-btn" type="button">Demo-Fahrt laden</button>
+          </div>
+          <p class="dz-limit">Max. 80 MB · .fit</p>
+        </section>
+
+        <section class="dashboard" id="dashboard" hidden>
+          <div class="ride-card panel">
+            <div class="ride-file">
+              <span class="file-dot" aria-hidden="true"></span>
+              <div class="ride-file-text">
+                <span class="eyebrow">Aktive Datei</span>
+                <strong id="ride-name">–</strong>
+                <span id="ride-sub" class="muted"></span>
+              </div>
+            </div>
+            <div class="meta-actions">
+              <button class="btn btn-small" id="csv-btn" type="button">CSV</button>
+              <button class="btn btn-small" id="json-btn" type="button">JSON</button>
+            </div>
+          </div>
+
+          <div class="warnings" id="warnings" hidden></div>
+
+          <div class="kpi-grid" id="kpis"></div>
+
+          <div class="workspace">
+            <aside class="panel controls" aria-label="Erkennungsparameter">
+              <div class="panel-head">
+                <h2>Erkennung</h2>
+                <button class="link-btn" id="reset-controls" type="button">Zurücksetzen</button>
+              </div>
+              <p class="control-intro">
+                Die Analyse läuft bei jeder Änderung sofort neu. Die Schwelle wird im
+                Auto-Modus aus dem Leistungsprofil geschätzt.
+              </p>
+
+              <div class="control">
+                <div class="control-label">
+                  <label for="threshold">ON-Schwelle</label>
+                  <output id="threshold-out" for="threshold">–</output>
+                </div>
+                <input id="threshold" type="range" min="60" max="900" step="5" value="250" />
+                <label class="switch">
+                  <input id="auto-threshold" type="checkbox" checked />
+                  <span>Automatisch schätzen</span>
+                </label>
+              </div>
+
+              <div class="control">
+                <div class="control-label">
+                  <label for="smoothing">Glättung</label>
+                  <output id="smoothing-out" for="smoothing">5 s</output>
+                </div>
+                <input id="smoothing" type="range" min="1" max="15" step="1" value="5" />
+              </div>
+
+              <div class="control-row">
+                <div class="control">
+                  <div class="control-label">
+                    <label for="min-on">min. Belastung</label>
+                    <output id="min-on-out" for="min-on">10 s</output>
+                  </div>
+                  <input id="min-on" type="range" min="5" max="120" step="5" value="10" />
+                </div>
+                <div class="control">
+                  <div class="control-label">
+                    <label for="min-off">min. Erholung</label>
+                    <output id="min-off-out" for="min-off">10 s</output>
+                  </div>
+                  <input id="min-off" type="range" min="5" max="120" step="5" value="10" />
+                </div>
+              </div>
+
+              <div class="control">
+                <div class="control-label">
+                  <label for="set-break">Satz-Trennung</label>
+                  <output id="set-break-out" for="set-break">90 s</output>
+                </div>
+                <input id="set-break" type="range" min="30" max="300" step="10" value="90" />
+                <p class="hint">Pausen länger als dieser Wert starten einen neuen Satz.</p>
+              </div>
+
+              <div class="control">
+                <div class="control-label">
+                  <label for="ftp">FTP (optional)</label>
+                </div>
+                <input id="ftp" class="number-input" type="number" min="0" max="700" step="1" placeholder="z. B. 300" />
+                <p class="hint">Aktiviert IF, TSS und die Zonenverteilung.</p>
+              </div>
+            </aside>
+
+            <div class="content-col">
+              <div class="panel chart-panel">
+                <div class="panel-head">
+                  <div>
+                    <span class="eyebrow">Zeitreihe</span>
+                    <h2>Leistungsprofil</h2>
+                  </div>
+                  <div class="chart-meta">
+                    <span class="mini-legend"><i class="legend-line legend-power"></i>Leistung</span>
+                    <span class="mini-legend"><i class="legend-line legend-hr"></i>HF</span>
+                    <span class="chart-hint">Legende anklicken zum Ausblenden</span>
+                  </div>
+                </div>
+                <div class="chart-wrap">
+                  <canvas id="chart" role="img" aria-label="Leistungs- und Herzfrequenzdiagramm mit markierten Intervallen"></canvas>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <span class="eyebrow">Struktur</span>
+                    <h2>Erkannte Sätze</h2>
+                  </div>
+                  <span class="pill" id="set-count">0</span>
+                </div>
+                <div class="set-grid" id="sets"></div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <span class="eyebrow">Details</span>
+                    <h2>Intervalle</h2>
+                  </div>
+                  <span class="pill" id="interval-count">0</span>
+                </div>
+                <div class="table-wrap">
+                  <table class="interval-table">
+                    <thead>
+                      <tr>
+                        <th scope="col">#</th>
+                        <th scope="col">Satz</th>
+                        <th scope="col">Start</th>
+                        <th scope="col">Dauer</th>
+                        <th scope="col" class="num">Ø W</th>
+                        <th scope="col" class="num">Max W</th>
+                        <th scope="col" class="num">Ø HF</th>
+                        <th scope="col" class="num">Ø TF</th>
+                        <th scope="col" class="num">kJ</th>
+                      </tr>
+                    </thead>
+                    <tbody id="interval-body"></tbody>
+                  </table>
+                </div>
+              </div>
+
+              <div class="panel">
+                <div class="panel-head">
+                  <div>
+                    <span class="eyebrow">Intensität</span>
+                    <h2>Zonenverteilung</h2>
+                  </div>
+                  <span class="pill" id="zone-ref">–</span>
+                </div>
+                <div id="zones" class="zones"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <span>FIT Insight · Parsing &amp; Analyse vollständig im Browser</span>
+        <span>Garmin FIT SDK · Chart.js</span>
+      </footer>
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
