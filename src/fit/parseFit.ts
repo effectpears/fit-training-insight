@@ -1,5 +1,12 @@
 import { Decoder, Stream } from '@garmin/fitsdk';
-import type { FitLap, FitRecord, FitSessionSummary, RideData } from '../types';
+import type {
+  FitLap,
+  FitRecord,
+  FitSessionSummary,
+  FitWorkout,
+  FitWorkoutStep,
+  RideData,
+} from '../types';
 
 const READ_OPTIONS = {
   applyScaleAndOffset: true,
@@ -7,6 +14,101 @@ const READ_OPTIONS = {
   convertTypesToStrings: true,
   convertDateTimesToDates: true,
 } as const;
+
+/** Target-Typen von Workout-Schritten (FIT-Profile). */
+const WKT_TARGET_POWER_ZONE = 2;
+const WKT_TARGET_POWER = 6;
+
+/**
+ * Baut strukturierte Workouts aus den FIT-Nachrichten workout_mesg /
+ * workout_step_mesg. Jedes Workout erhält die nächsten
+ * `numValidSteps` Schritte (sortiert nach messageIndex); übernimmt
+ * die Schritte allen Workouts, denen keine zugeordnet werden konnten.
+ */
+function extractWorkouts(
+  workoutMesgs: readonly unknown[],
+  stepMesgs: readonly unknown[],
+): FitWorkout[] {
+  const steps = stepMesgs
+    .map((mesg) => toWorkoutStep(mesg))
+    .filter((step): step is FitWorkoutStep => step != null)
+    .sort((a, b) => (a.messageIndex ?? 0) - (b.messageIndex ?? 0));
+
+  const workouts: FitWorkout[] = [];
+  let stepCursor = 0;
+
+  for (const mesg of workoutMesgs) {
+    const workout = mesg as {
+      numValidSteps?: unknown;
+      wktName?: unknown;
+      wktDescription?: unknown;
+      sport?: unknown;
+    };
+    const numValidSteps = toNumber(workout.numValidSteps) ?? 0;
+    const workoutSteps = steps.slice(stepCursor, stepCursor + numValidSteps);
+    stepCursor += numValidSteps;
+
+    workouts.push({
+      name: toStringValue(workout.wktName),
+      description: toStringValue(workout.wktDescription),
+      sport: toStringValue(workout.sport),
+      numValidSteps: workoutSteps.length,
+      steps: workoutSteps,
+    });
+  }
+
+  // Schritte, die keinem Workout zugeordnet wurden (defensiv).
+  if (stepCursor < steps.length) {
+    workouts.push({
+      name: undefined,
+      description: undefined,
+      sport: undefined,
+      numValidSteps: steps.length - stepCursor,
+      steps: steps.slice(stepCursor),
+    });
+  }
+
+  return workouts;
+}
+
+/** Wandelt eine workout_step_mesg in einen FitWorkoutStep. */
+function toWorkoutStep(mesg: unknown): FitWorkoutStep | null {
+  const step = mesg as {
+    messageIndex?: unknown;
+    wktStepName?: unknown;
+    durationType?: unknown;
+    durationValue?: unknown;
+    targetType?: unknown;
+    targetValue?: unknown;
+    targetValueLow?: unknown;
+    targetValueHigh?: unknown;
+    intensity?: unknown;
+  };
+  const messageIndex = toNumber(step.messageIndex);
+  if (messageIndex == null) return null;
+
+  const targetType = toStringValue(step.targetType);
+  const isPowerTarget =
+    targetType === 'power' ||
+    Number(step.targetType) === WKT_TARGET_POWER_ZONE ||
+    Number(step.targetType) === WKT_TARGET_POWER;
+  const targetPower = isPowerTarget
+    ? toNumber(step.targetValue ?? step.targetValueLow)
+    : undefined;
+
+  return {
+    messageIndex,
+    name: toStringValue(step.wktStepName),
+    durationValue: toNumber(step.durationValue),
+    durationType: toStringValue(step.durationType),
+    targetType,
+    targetValueLow: toNumber(step.targetValueLow),
+    targetValueHigh: toNumber(step.targetValueHigh),
+    intensity: (toStringValue(step.intensity) ??
+      undefined) as FitWorkoutStep['intensity'],
+    targetPower,
+  };
+}
 
 export async function parseFitFile(file: File): Promise<RideData> {
   const buffer = await file.arrayBuffer();
@@ -94,6 +196,11 @@ export function parseFitBuffer(
     records[records.length - 1].timestamp,
   );
 
+  const workouts = extractWorkouts(
+    decoded.messages.workoutMesgs ?? [],
+    decoded.messages.workoutStepMesgs ?? [],
+  );
+
   const sessionMesg = decoded.messages.sessionMesgs?.[0];
   const fileIdMesg = decoded.messages.fileIdMesgs?.[0];
   const session: FitSessionSummary = {
@@ -120,7 +227,7 @@ export function parseFitBuffer(
     if (last.distance != null) session.totalDistance = last.distance;
   }
 
-  return { fileName, fileSize, records, session, laps, warnings };
+  return { fileName, fileSize, records, session, laps, workouts, warnings };
 }
 
 /**

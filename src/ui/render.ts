@@ -107,6 +107,9 @@ export function renderSets(container: HTMLElement, analysis: AnalysisResult): vo
         <article class="set-card">
           <div class="set-card-top">
             <span class="set-badge">SET ${set.id}</span>
+            ${set.kind === 'over-under'
+              ? '<span class="set-kind-badge">Over-Under</span>'
+              : ''}
             <span class="set-time">${formatClock(set.start)} – ${formatClock(set.end)}</span>
           </div>
           <h3>${reps}</h3>
@@ -127,7 +130,7 @@ export function renderIntervals(container: HTMLElement, analysis: AnalysisResult
   if (analysis.intervals.length === 0) {
     container.innerHTML = `
       <tr>
-        <td colspan="10">
+        <td colspan="11">
           <div class="empty-state">Keine Intervalle erkannt – Schwellenwerte anpassen.</div>
         </td>
       </tr>`;
@@ -144,6 +147,16 @@ export function renderIntervals(container: HTMLElement, analysis: AnalysisResult
           <td>${formatSeconds(interval.duration)}</td>
           <td class="num strong">${formatNumber(interval.avgPower)}</td>
           <td class="num">${formatNumber(interval.maxPower)}</td>
+          <td class="badge-cell">
+            ${interval.source === 'lap'
+              ? '<span class="badge badge-lap">Lap</span>'
+              : interval.source === 'power'
+                ? '<span class="badge badge-power">Leistung</span>'
+                : '–'}
+            ${interval.under === true
+              ? '<span class="badge badge-under">Under</span>'
+              : ''}
+          </td>
           <td class="steps"${interval.steps?.length ? ` title="${stepChanges(interval.steps)}"` : ''}>${
             interval.steps?.length ? stepLevels(interval.steps) : '–'
           }</td>

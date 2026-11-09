@@ -199,8 +199,13 @@ function drawFooter(ctx: CanvasRenderingContext2D, analysis: AnalysisResult): vo
   ctx.textAlign = 'left';
   ctx.fillStyle = '#5f6c7a';
   ctx.font = `400 12px ${CHART_FONT}`;
+  const confidenceLine = analysis.thresholdInfo.confidence
+    ? ` · Konfidenz ${Math.round(
+        analysis.thresholdInfo.confidence * 100,
+      )}% (${analysis.thresholdInfo.method})`
+    : '';
   ctx.fillText(
-    `FIT Insight · ON-Schwelle ${analysis.thresholdW} W · Glättung ${analysis.options.smoothingSeconds} s · min. ON ${analysis.options.minOnSeconds} s`,
+    `FIT Insight · ON-Schwelle ${analysis.thresholdW} W · Glättung ${analysis.options.smoothingSeconds} s · min. ON ${analysis.options.minOnSeconds} s${confidenceLine}`,
     60,
     1304,
   );

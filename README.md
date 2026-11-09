@@ -46,7 +46,7 @@ Voraussetzungen: Node.js ≥ 20.19.
 ```bash
 npm install
 npm run dev        # http://localhost:5173
-npm test           # 24 Unit-Tests
+npm test           # 28 Unit-Tests
 npm run typecheck
 npm run build      # Production-Build nach dist/
 npm run preview
@@ -84,8 +84,11 @@ Die Pipeline ist bewusst erklärbar und ohne Blackbox:
    drei 45-s-Intervalle pro Wiederholung statt als ein verschmolzener 2:15-Block.
    Monotone Rampen (z. B. ein Warm-up-Surge) werden dabei verworfen.
 6. **Lap-Marker** – zeichnet das Garmin-Workout Belastung und Pause als eigene Laps
-   auf (z. B. 45-s-Steps oder 8/8/10-min-Blöcke), werden deren exakte Grenzen
-   bevorzugt. Ohne solche Marker greift die rein leistungsbasierte Erkennung.
+   auf (z. B. 45-s-Steps, 8/8/10-min-Blöcke oder ein einzelner langer Tempoblock
+   zwischen Warm-up und Cool-down), werden deren exakte Grenzen bevorzugt. Das
+   gilt auch für nur eine Belastungslap; Voraussetzung ist eine klare Trennung
+   zwischen Belastungs- und Erholungslaps, damit Auto-Laps auf gleichmäßigen
+   Fahrten keine Intervalle erzeugen. Sonst greift die leistungsbasierte Erkennung.
 7. **Kontrast-Prüfung** – nur Blöcke, die sich deutlich von der umgebenden Erholung
    abheben (mind. 12 W und 18 % bzw. 40 W Differenz), gelten als Intervall. Bleibt
    genau ein Block übrig, muss er zusätzlich mindestens 30 % bzw. 45 W über der

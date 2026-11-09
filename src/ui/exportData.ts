@@ -15,6 +15,9 @@ export function exportIntervalsCsv(ride: RideData, analysis: AnalysisResult): vo
     'avg_hr_bpm',
     'avg_cadence_rpm',
     'work_kj',
+    'source',
+    'under',
+    'confidence',
   ];
   const lines = [header.join(',')];
   for (const interval of analysis.intervals) {
@@ -33,6 +36,9 @@ export function exportIntervalsCsv(ride: RideData, analysis: AnalysisResult): vo
         interval.avgHeartRate?.toFixed(1) ?? '',
         interval.avgCadence?.toFixed(1) ?? '',
         interval.workKJ.toFixed(2),
+        interval.source ?? '',
+        interval.under === true ? '1' : '',
+        interval.confidence?.toFixed(2) ?? '',
       ].join(','),
     );
   }
@@ -55,6 +61,11 @@ export function exportAnalysisJson(ride: RideData, analysis: AnalysisResult): vo
     },
     settings: {
       thresholdW: analysis.thresholdW,
+      thresholdInfo: {
+        confidence: analysis.thresholdInfo.confidence,
+        method: analysis.thresholdInfo.method,
+        onFraction: analysis.thresholdInfo.onFraction,
+      },
       autoThreshold: analysis.options.autoThreshold,
       smoothingSeconds: analysis.options.smoothingSeconds,
       minOnSeconds: analysis.options.minOnSeconds,
@@ -62,9 +73,13 @@ export function exportAnalysisJson(ride: RideData, analysis: AnalysisResult): vo
       setBreakSeconds: analysis.options.setBreakSeconds,
       ftp: analysis.options.ftp ?? null,
     },
-    metrics: analysis.metrics,
+    metrics: {
+      ...analysis.metrics,
+      stoppedSeconds: analysis.metrics.stoppedSeconds,
+    },
     sets: analysis.sets.map(({ intervals, ...set }) => ({
       ...set,
+      kind: set.kind,
       intervalIndexes: intervals.map((interval) => interval.index),
     })),
     intervals: analysis.intervals,

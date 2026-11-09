@@ -1,6 +1,12 @@
 import './fonts.css';
 import './styles.css';
-import type { AppState, DetectionOptions, RideData, SeriesPoint } from './types';
+import type {
+  AnalysisResult,
+  AppState,
+  DetectionOptions,
+  RideData,
+  SeriesPoint,
+} from './types';
 import { Chart } from './chart/setup';
 import { analyzeRide } from './analysis/analyze';
 import { buildSeries } from './analysis/series';
@@ -46,6 +52,7 @@ const els = {
   resetControls: byId<HTMLButtonElement>('reset-controls'),
   threshold: byId<HTMLInputElement>('threshold'),
   thresholdOut: byId<HTMLOutputElement>('threshold-out'),
+  thresholdHint: byId<HTMLOutputElement>('threshold-hint'),
   autoThreshold: byId<HTMLInputElement>('auto-threshold'),
   smoothing: byId<HTMLInputElement>('smoothing'),
   smoothingOut: byId<HTMLOutputElement>('smoothing-out'),
@@ -235,9 +242,14 @@ function loadDemo(): void {
 }
 
 function startRide(ride: RideData): void {
-  if (!ride.records.some((record) => record.power != null)) {
+  const hasPower = ride.records.some((record) => record.power != null);
+  const hasHeartRate = ride.records.some(
+    (record) => record.heartRate != null,
+  );
+  if (!hasPower && !hasHeartRate) {
     throw new Error(
-      'Die Datei enthält keine Leistungsdaten. Für die Intervallererkennung wird ein Power-Meter benötigt.',
+      'Die Datei enthält weder Leistungs- noch Herzfrequenzdaten. Für die '
+        + 'Analyse werden ein Power-Meter oder ein Herzfrequenzsensor benötigt.',
     );
   }
 
@@ -300,12 +312,14 @@ function runAnalysis(): void {
       options,
       state.ride?.session.totalDistance ?? null,
       state.ride?.laps ?? [],
+      state.ride?.workouts ?? [],
     );
     state.analysis = analysis;
     state.options = analysis.options;
 
     syncControls();
     renderKpis(els.kpis, analysis);
+    renderThresholdHint(analysis);
     renderSets(els.sets, analysis);
     renderIntervals(els.intervals, analysis);
     renderZones(els.zones, els.zoneRef, analysis);
@@ -388,6 +402,19 @@ function updateOutputs(): void {
   els.minOnOut.textContent = `${els.minOn.value} s`;
   els.minOffOut.textContent = `${els.minOff.value} s`;
   els.setBreakOut.textContent = `${els.setBreak.value} s`;
+}
+
+/** Zeigt einen Hinweis zur geschätzten Schwelle und deren Konfidenz. */
+function renderThresholdHint(analysis: AnalysisResult): void {
+  if (!els.autoThreshold.checked || !analysis.thresholdInfo) {
+    els.thresholdHint.textContent = '–';
+    return;
+  }
+  const pct = Math.round(analysis.thresholdInfo.confidence * 100);
+  els.thresholdHint.textContent =
+    pct > 0
+      ? `geschätzt (${analysis.thresholdInfo.method}, Konfidenz ${pct} %)`
+      : 'geschätzt (geringe Konfidenz)';
 }
 
 function paintAllRanges(): void {

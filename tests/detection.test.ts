@@ -202,3 +202,119 @@ describe('Schritt-Annotation in langen Blöcken', () => {
     expect(result.intervals[0].steps).toBeUndefined();
   });
 });
+
+describe('Bevorzugte Lap-Erkennung', () => {
+  it('übernimmt die exakten Lap-Grenzen statt der Leistungskanten', () => {
+    const start = Date.UTC(2026, 6, 1, 8, 0, 0);
+    // Die Leistung steigt erst bei 600 s, die Laps beginnen aber 30 s früher
+    // und enden 30 s später → nur der Lap-Pfad trifft diese Grenzen exakt.
+    const records = Array.from({ length: 3600 }, (_, second) => ({
+      timestamp: start + second * 1000,
+      power: second >= 600 && second < 2400 ? 240 : 150,
+    }));
+    const laps = [
+      { start: 0, end: 570, duration: 570 },
+      { start: 570, end: 2430, duration: 1860 },
+      { start: 2430, end: 3600, duration: 1170 },
+    ];
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 200 },
+      null,
+      laps,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    expect(result.intervals[0].start).toBe(570);
+    expect(result.intervals[0].end).toBe(2430);
+    expect(result.intervals[0].duration).toBe(1860);
+  });
+
+  it('erkennt einen einzelnen langen Block auch ohne zweiten Work-Lap', () => {
+    // 10 min Warm-up, 30 min Tempo, 20 min Cool-down – je eine Lap.
+    const start = Date.UTC(2026, 6, 2, 8, 0, 0);
+    const records = Array.from({ length: 3600 }, (_, second) => ({
+      timestamp: start + second * 1000,
+      power: second < 600 ? 150 : second < 2400 ? 240 : 150,
+    }));
+    const laps = [
+      { start: 0, end: 600, duration: 600 },
+      { start: 600, end: 2400, duration: 1800 },
+      { start: 2400, end: 3600, duration: 1200 },
+    ];
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 200 },
+      null,
+      laps,
+    );
+
+    expect(result.intervals).toHaveLength(1);
+    expect(result.intervals[0].start).toBe(600);
+    expect(result.intervals[0].end).toBe(2400);
+    expect(result.sets).toHaveLength(1);
+    expect(result.phases.map((phase) => phase.kind)).toEqual([
+      'warmup',
+      'set',
+      'cooldown',
+    ]);
+  });
+
+  it('verwirft Auto-Laps, die nur knapp um die Schwelle pendeln', () => {
+    // Gleichmäßige Fahrt; die Laps wechseln minimal über/unter die Schwelle.
+    const start = Date.UTC(2026, 6, 3, 8, 0, 0);
+    const records = Array.from({ length: 3600 }, (_, second) => ({
+      timestamp: start + second * 1000,
+      power: Math.floor(second / 600) % 2 === 0 ? 161 : 159,
+    }));
+    const laps = Array.from({ length: 6 }, (_, index) => ({
+      start: index * 600,
+      end: (index + 1) * 600,
+      duration: 600,
+    }));
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 160 },
+      null,
+      laps,
+    );
+
+    expect(result.intervals).toHaveLength(0);
+    expect(result.sets).toHaveLength(0);
+  });
+
+  it('gruppiert klassische Lap-Intervalle weiterhin zu Sätzen', () => {
+    // 5 min Warm-up, 5 min Belastung, 5 min Pause, 5 min Belastung, 5 min Cool-down.
+    const start = Date.UTC(2026, 6, 4, 8, 0, 0);
+    const records = Array.from({ length: 1500 }, (_, second) => {
+      const inWork =
+        (second >= 300 && second < 600) || (second >= 900 && second < 1200);
+      return { timestamp: start + second * 1000, power: inWork ? 260 : 150 };
+    });
+    const laps = [
+      { start: 0, end: 300, duration: 300 },
+      { start: 300, end: 600, duration: 300 },
+      { start: 600, end: 900, duration: 300 },
+      { start: 900, end: 1200, duration: 300 },
+      { start: 1200, end: 1500, duration: 300 },
+    ];
+
+    const result = analyzeRide(
+      buildSeries(records),
+      { ...DEFAULT_OPTIONS, autoThreshold: false, thresholdW: 200 },
+      null,
+      laps,
+    );
+
+    expect(result.intervals).toHaveLength(2);
+    expect(
+      result.intervals.map((interval) => [interval.start, interval.end]),
+    ).toEqual([
+      [300, 600],
+      [900, 1200],
+    ]);
+  });
+});

@@ -73,6 +73,7 @@ export function createDemoRide(): RideData {
     fileSize: 0,
     records,
     laps: [],
+    workouts: [],
     warnings: [],
     session: {
       sport: 'cycling',

@@ -25,6 +25,7 @@ export function computeMetrics(
   let maxPower = 0;
   let work = 0;
   let movingTime = 0;
+  let stoppedSeconds = 0;
   const heartRates: number[] = [];
   const cadences: number[] = [];
 
@@ -38,6 +39,17 @@ export function computeMetrics(
     }
     if (point.heartRate != null) heartRates.push(point.heartRate);
     if (point.cadence != null) cadences.push(point.cadence);
+    // Stillstand: keine Bewegung (speed = 0) und keine Anstrengung
+    // (power = 0 oder fehlend). Lücken in den Daten zählen nicht als
+    // Stillstand, sondern werden ignoriert.
+    // Stillstand: explizit Null-Geschwindigkeit und keine Leistung
+    // (Power-Meter zeichnet 0 W im Stillstand auf). Datenlücken
+    // (fehlende Werte) zählen nicht als Stillstand.
+    const speed = point.speed;
+    const power = point.power;
+    if (speed != null && power != null && speed <= 0 && power <= 0) {
+      stoppedSeconds += 1;
+    }
   }
 
   const avgPower = powerCount > 0 ? powerSum / powerCount : 0;
@@ -68,6 +80,7 @@ export function computeMetrics(
   return {
     duration: series.duration,
     movingTime,
+    stoppedSeconds,
     distanceM,
     avgPower,
     maxPower,
